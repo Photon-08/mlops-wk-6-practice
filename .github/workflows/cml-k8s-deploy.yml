@@ -1,0 +1,125 @@
+name: CML CI/CD to GKE
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python for CML
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+
+    - name: Stup CML
+      uses: iterative/setup-cml@v2.0.1
+
+    ###############################################
+    # ✅ Authenticate to Google Cloud using SA key
+    ###############################################
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+    ###############################################
+    # ✅ Set up Google Cloud SDK
+    ###############################################
+    - name: Set up Google Cloud SDK
+      uses: google-github-actions/setup-gcloud@v1
+      with:
+        project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+    ###############################################
+    # ✅ Configure Docker to use Artifact Registry
+    ###############################################
+    - name: Configure Docker for Artifact Registry
+      run: gcloud auth configure-docker us-central1-docker.pkg.dev
+
+    ###############################################
+    # ✅ Build & Push Docker Image
+    ###############################################
+    - name: Build Docker image
+      run: |
+        docker build -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/my-repo/iris-api-test:latest .
+
+    - name: Push Docker image
+      run: |
+        docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/my-repo/iris-api-test:latest
+
+    ###############################################
+    # ✅ Get GKE credentials and deploy
+    ###############################################
+
+    - name: Install GKE gcloud auth plugin
+      run: |
+        gcloud components install gke-gcloud-auth-plugin -q
+
+    - name: Get GKE credentials
+      run: |
+        gcloud container clusters get-credentials ${{ secrets.GKE_CLUSTER_NAME }} \
+          --region ${{ secrets.GCP_REGION }}
+
+    - name: Deploy to GKE
+      run: |
+        kubectl apply -f k8s/deployment.yaml
+        kubectl apply -f k8s/service.yaml
+        sleep 120s  # Wait for deployment to stabilize
+    
+
+    ###############################################
+    # ✅ Wait for external IP and comment with CML
+    ###############################################
+    - name: Wait for service to get external IP
+      run: |
+        for i in {1..10}; do
+          EXTERNAL_IP=$(kubectl get svc iris-api-service-ci -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          if [[ -n "$EXTERNAL_IP" ]]; then
+            echo "External IP assigned: $EXTERNAL_IP"
+            echo "EXTERNAL_IP=$EXTERNAL_IP" >> $GITHUB_ENV
+            break
+          fi
+          sleep 100
+          echo "Waiting for external IP..."
+          sleep 100
+        done
+
+    
+    - name: Test prediction endpoint
+      id: test-predict
+      run: |
+        RESPONSE=$(curl -s -X POST "http://${EXTERNAL_IP}:8000/predict" \
+          -H "Content-Type: application/json" \
+          -d '{"features": [63, 1, 3, 145, 233, 1, 0, 150, 0, 2.3, 0, 0, 1]}')
+
+
+
+          
+        echo "RESPONSE=$RESPONSE" >> $GITHUB_ENV
+        echo "Response: $RESPONSE"
+        echo "Got Output from prediction endpoint"
+    
+    - name: Create CML report comment
+      if: ${{ env.RESPONSE != '' }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.CML_PAT }}
+      run: |
+        echo "## 🚀 Iris Model Deployed and Responding" > report.md
+        echo "**Endpoint:** http://${EXTERNAL_IP}:8000/predict" >> report.md
+        echo "" >> report.md
+        echo "**Sample Prediction Response:**" >> report.md
+        echo "\`\`\`json" >> report.md
+        echo "${{ env.RESPONSE }}" >> report.md
+        echo "\`\`\`" >> report.md
+        cml comment create --publish report.md

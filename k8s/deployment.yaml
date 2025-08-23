@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name:  uci-heart-health-practice
+  labels:
+    app: heart-health-api-ci
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: heart-health-api-ci
+  template:
+    metadata:
+      labels:
+        app: heart-health-api-ci
+    spec:
+      containers:
+        - name: heart-health-api
+          image: us-central1-docker.pkg.dev/banded-cumulus-466503-q7/my-repo/heart-health-api-test:latest
+
+          ports:
+            - containerPort: 8000
+          

@@ -20,6 +20,7 @@ class PredictionInput(BaseModel):
         return v
 
 # Define the prediction endpoint
+#api route to predict heart disease
 @app.post("/predict")
 def predict(data: PredictionInput):
     """

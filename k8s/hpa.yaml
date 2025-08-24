@@ -9,14 +9,14 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     # This name MUST match the name of your Deployment resource
-    name: ml-model-deployment
+    name: uci-heart-health-practice
   
   # The minimum number of replicas the deployment can scale down to.
   # This should match the 'replicas' field in your Deployment for the initial state.
-  minReplicas: 2
+  minReplicas: 1
   
   # The maximum number of replicas the deployment can scale up to.
-  maxReplicas: 10
+  maxReplicas: 2
   
   # The metrics used to determine when to scale up or down.
   metrics:
